@@ -41,7 +41,7 @@ class COCOStuffeval:
     # Code written by Piotr Dollar and Tsung-Yi Lin, 2015.
     # Licensed under the Simplified BSD License [see coco/license.txt]
 
-    def __init__(self, cocoGt, cocoRes, stuffStartId=92, stuffEndId=182, addOther=True):
+    def __init__(self, cocoGt, cocoRes, stuffStartId=92, stuffEndId=182, addOther=True, backgroundLabel=False, backgroundId=0):
         '''
         Initialize COCOStuffeval using COCO APIs for gt and dt
         :param cocoGt: COCO object with ground truth annotations
@@ -49,6 +49,8 @@ class COCOStuffeval:
         :param stuffStartId: id of the first stuff class
         :param stuffEndId: id of the last stuff class
         :param addOther: whether to use a other class
+        :param backgroundLabel: if the label contains background, i.e., mask image has 0
+        :param backgroundId: if backgroundLabel=True, specify which Id is for background. By default use 0 
         :return: None
         '''
         self.cocoGt   = cocoGt              # Ground truth COCO API
@@ -65,6 +67,10 @@ class COCOStuffeval:
         self.params.imgIds = sorted(cocoGt.getImgIds()) # By default we use all images from the GT file
         self.catIds = range(stuffStartId, stuffEndId+addOther+1) # Take into account all stuff
                                                                  # classes and one 'other' class
+        self.backgroundLabel = backgroundLabel        # if the label contains background, i.e., mask image has value x if backgroundId=x
+        self.backgroundId = backgroundId    # specify background label Id. by default use 0
+        if backgroundLabel:
+            self.catIds += [backgroundId]
 
     def evaluate(self):
         '''
@@ -91,6 +97,8 @@ class COCOStuffeval:
 
         # Create confusion matrix
         labelCount = max([c for c in self.cocoGt.cats])
+        if self.backgroundLabel:
+            labelCount += 1
         confusion = np.zeros((labelCount, labelCount))
         for i, imgId in enumerate(imgIds):
             if i+1 == 1 or i+1 == len(imgIds) or (i+1) % 10 == 0:
@@ -140,7 +148,7 @@ class COCOStuffeval:
         #    confusion[g-1, d-1] += 1
 
         # Much faster version using np.unique
-        n = confusion.shape[0] + 1  # Arbitrary number > labelCount
+        n = confusion.shape[0]  + 1  # Arbitrary number > labelCount
         map_for_count = validGt * n + validRes
         vals, cnts = np.unique(map_for_count, return_counts=True)
         for v, c in zip(vals, cnts):
@@ -199,6 +207,8 @@ class COCOStuffeval:
 
         # Retrieve supercategory mapping
         supCats = [c['supercategory'] for c in self.cocoGt.cats.values()]
+        if self.backgroundLabel:
+            supCats.insert(self.backgroundId, 'background')
         supCatsUn = sorted(set(supCats))
         keys = supCatsUn
         vals = range(0, len(supCatsUn))
@@ -243,12 +253,17 @@ class COCOStuffeval:
         
         # Check which classes have elements
         valid = posGt > 0
+        if self.backgroundLabel:
+            valid[self.backgroundId-1] = False
         iousValid = np.logical_and(valid, posGt + posPred - tp > 0)
 
         # Compute per-class results and frequencies
         ious[iousValid] = np.divide(tp[iousValid], posGt[iousValid] + posPred[iousValid] - tp[iousValid])
         maccs[valid] = np.divide(tp[valid], posGt[valid])
         freqs = np.divide(posGt, total)
+        if self.backgroundLabel:
+            freqs[self.backgroundId-1] = 0
+            freqs /= freqs.sum()
 
         # Compute evaluation metrics
         miou = np.mean(ious[iousValid])
